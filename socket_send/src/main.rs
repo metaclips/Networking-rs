@@ -1,6 +1,5 @@
 use std::io::prelude::*;
-use std::io::BufWriter;
-use std::io::*;
+use std::io::{stdin, stdout, BufReader};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::str::FromStr;
 use std::thread;
@@ -39,17 +38,30 @@ fn start_server() {
     println!("Server started on {}", addr);
 
     loop {
-        let (mut stream, addr) = listener.accept().expect("unable to get client");
+        let (stream, addr) = listener.accept().expect("unable to get client");
         println!("Found a client. {}", addr);
 
         thread::spawn(move || {
-            let mut msg = String::new();
+            // Add a buffered stream to read packets from clients.
+            let mut stream = BufReader::new(stream);
 
-            let _ = stream.read_to_string(&mut msg).unwrap();
+            loop {
+                let mut msg = String::new();
 
-            let msg = msg.strip_suffix("\n").unwrap();
+                let _ = stream.read_line(&mut msg).unwrap();
 
-            println!("{}. Address is {}", msg, addr);
+                match msg.strip_suffix("\n") {
+                    Some(msg) => {
+                        println!("Message from: {}: {}", addr, msg);
+                    }
+
+                    None => {
+                        // If a nil message is sent, it is assumed user as exited by calling ctrl-C.
+                        println!("User {} exited", addr);
+                        break;
+                    }
+                }
+            }
         });
     }
 }
@@ -70,19 +82,21 @@ fn start_client() {
     let addr = SocketAddr::from_str(&addr).expect("IP address specified is incorrect.");
     println!("Connecting client...");
 
-    let mut stream =
-        BufWriter::new(TcpStream::connect_timeout(&addr, time::Duration::new(10, 0)).unwrap());
+    let mut stream = TcpStream::connect_timeout(&addr, time::Duration::new(10, 0)).unwrap();
 
     println!("Connected");
 
-    let mut msg = String::new();
-    print!("Enter message:\t");
-    stdout().flush().unwrap();
+    loop {
+        let mut msg = String::new();
+        print!(">:\t");
+        stdout().flush().unwrap();
 
-    let _ = stdin()
-        .read_line(&mut msg)
-        .expect("could not get user input");
+        let _ = stdin()
+            .read_line(&mut msg)
+            .expect("could not get user input");
 
-    let _ = stream.write_all(msg.as_bytes()).unwrap();
-    let _ = stream.flush().unwrap();
+        let _ = stream.write_all(msg.as_bytes()).unwrap();
+        // Flush out stream ensuring message was sent.
+        let _ = stream.flush().unwrap();
+    }
 }
